@@ -75,6 +75,33 @@ This tool uses a hybrid approach, primarily focusing on tracing but with careful
 #include <torch/script.h>
 #include <vector>
 #include <iostream>
+#include <cmath>
+
+// Generate a sine wave audio signal
+torch::Tensor generate_sine_wave(float frequency, float duration, int sample_rate = 16000) {
+    int num_samples = static_cast<int>(duration * sample_rate);
+    torch::Tensor time = torch::arange(0, num_samples) / sample_rate;
+    
+    // Generate sine wave: amplitude * sin(2π * frequency * time)
+    float amplitude = 0.5;  // Avoid clipping
+    torch::Tensor audio = amplitude * torch::sin(2 * M_PI * frequency * time);
+    
+    // Add batch dimension [1, audio_length]
+    return audio.unsqueeze(0);
+}
+
+// Calculate cosine similarity between two tensors
+float cosine_similarity(const torch::Tensor& a, const torch::Tensor& b) {
+    // Compute dot product
+    torch::Tensor dot_product = torch::sum(a * b);
+    
+    // Compute norms
+    torch::Tensor norm_a = torch::sqrt(torch::sum(a * a));
+    torch::Tensor norm_b = torch::sqrt(torch::sum(b * b));
+    
+    // Return cosine similarity
+    return dot_product.item<float>() / (norm_a.item<float>() * norm_b.item<float>());
+}
 
 int main() {
     try {
@@ -82,21 +109,33 @@ int main() {
         torch::jit::script::Module model = torch::jit::load("path/to/model.pt");
         model.eval();
         
-        // Create input tensor (audio waveform at 16kHz)
-        // This example uses 1 second of silence
-        torch::Tensor audio = torch::zeros({1, 16000});
+        // Generate two different sine waves (3 seconds each)
+        // 440 Hz = A4 note
+        torch::Tensor audio1 = generate_sine_wave(440.0, 3.0);  
+        // 880 Hz = A5 note (one octave higher)
+        torch::Tensor audio2 = generate_sine_wave(880.0, 3.0);
         
-        // Perform inference
-        std::vector<torch::jit::IValue> inputs;
-        inputs.push_back(audio);
-        at::Tensor embedding = model.forward(inputs).toTensor();
+        // Perform inference on first sine wave
+        std::vector<torch::jit::IValue> inputs1;
+        inputs1.push_back(audio1);
+        torch::Tensor embedding1 = model.forward(inputs1).toTensor();
         
-        // Print the shape of the embedding
+        // Perform inference on second sine wave
+        std::vector<torch::jit::IValue> inputs2;
+        inputs2.push_back(audio2);
+        torch::Tensor embedding2 = model.forward(inputs2).toTensor();
+        
+        // Print the embedding shapes
         std::cout << "Embedding shape: " 
-                  << embedding.sizes()[0] << " x " 
-                  << embedding.sizes()[1] << std::endl;
-                  
-        // Embedding can now be used for music similarity, search, etc.
+                  << embedding1.sizes()[0] << " x " 
+                  << embedding1.sizes()[1] << std::endl;
+        
+        // Compare the embeddings
+        float similarity = cosine_similarity(embedding1.squeeze(), embedding2.squeeze());
+        std::cout << "Similarity between A4 and A5 notes: " << similarity << std::endl;
+        
+        // Values closer to 1 indicate higher similarity
+        // This is useful for music similarity search, genre classification, etc.
     }
     catch (const c10::Error& e) {
         std::cerr << "Error loading the model: " << e.what() << std::endl;
